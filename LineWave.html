@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Waves Animation</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: purple; /* BACKGROUND COLOURS!!!!!*/
+        }
+        .waves {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 160%;
+            height: 160%;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div class= "waves" >
+        <canvas id="wavesCanvas"></canvas>
+    </div>
+
+    <script>
+        class Grad {
+            constructor(x, y, z) {
+                this.x = x; this.y = y; this.z = z;
+            }
+            dot2(x, y) { return this.x * x + this.y * y; }
+        }
+
+        class Noise {
+            constructor(seed = 0) {
+                this.grad3 = [
+                    new Grad(1, 1, 0), new Grad(-1, 1, 0), new Grad(1, -1, 0), new Grad(-1, -1, 0),
+                    new Grad(1, 0, 1), new Grad(-1, 0, 1), new Grad(1, 0, -1), new Grad(-1, 0, -1),
+                    new Grad(0, 1, 1), new Grad(0, -1, 1), new Grad(0, 1, -1), new Grad(0, -1, -1)
+                ];
+                this.p = [...Array(256).keys()].map(i => i); 
+                this.perm = new Array(512);
+                this.gradP = new Array(512);
+                this.seed(seed);
+            }
+            seed(seed) {
+                if (seed > 0 && seed < 1) seed *= 65536;
+                seed = Math.floor(seed);
+                if (seed < 256) seed |= seed << 8;
+                for (let i = 0; i < 256; i++) {
+                    let v = (i & 1) ? (this.p[i] ^ (seed & 255)) : (this.p[i] ^ ((seed >> 8) & 255));
+                    this.perm[i] = this.perm[i + 256] = v;
+                    this.gradP[i] = this.gradP[i + 256] = this.grad3[v % 12];
+                }
+            }
+            fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+            lerp(a, b, t) { return (1 - t) * a + t * b; }
+            perlin2(x, y) {
+                let X = Math.floor(x), Y = Math.floor(y);
+                x -= X; y -= Y; X &= 255; Y &= 255;
+                const n00 = this.gradP[X + this.perm[Y]].dot2(x, y);
+                const n01 = this.gradP[X + this.perm[Y + 1]].dot2(x, y - 1);
+                const n10 = this.gradP[X + 1 + this.perm[Y]].dot2(x - 1, y);
+                const n11 = this.gradP[X + 1 + this.perm[Y + 1]].dot2(x - 1, y - 1);
+                const u = this.fade(x);
+                return this.lerp(
+                    this.lerp(n00, n10, u),
+                    this.lerp(n01, n11, u),
+                    this.fade(y)
+                );
+            }
+        }
+
+        const lineColor = "Black" ; /* LINE COLOURS!!!! LINE COLOURS!!!!*/
+        const waveSpeedX = 0.0125;
+        const waveSpeedY = 0.005;
+        const waveAmpX = 32;
+        const waveAmpY = 16;
+        const xGap = 10;
+        const yGap = 32;
+        const friction = 0.925;
+        const tension = 0.005;
+        const maxCursorMove = 100;
+
+        const canvas = document.getElementById('wavesCanvas');
+        const ctx = canvas.getContext('2d');
+        const noise = new Noise(Math.random());
+        const lines = [];
+        const mouse = { x: -10, y: 0, lx: 0, ly: 0, sx: 0, sy: 0, v: 0, vs: 0, a: 0, set: false };
+
+        function setSize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        function setLines() {
+            const width = canvas.width;
+            const height = canvas.height;
+            lines.length = 0;
+            const totalLines = Math.ceil(width / xGap);
+            const totalPoints = Math.ceil(height / yGap);
+            const xStart = (width - xGap * totalLines) / 2;
+            const yStart = (height - yGap * totalPoints) / 2;
+            for (let i = 0; i <= totalLines; i++) {
+                const pts = [];
+                for (let j = 0; j <= totalPoints; j++) {
+                    pts.push({
+                        x: xStart + xGap * i, y: yStart + yGap * j,
+                        wave: { x: 0, y: 0 },
+                        cursor: { x: 0, y: 0, vx: 0, vy: 0 }
+                    });
+                }
+                lines.push(pts);
+            }
+        }
+
+        function movePoints(time) {
+            lines.forEach((pts) => {
+                pts.forEach((p) => {
+                    const move = noise.perlin2(
+                        (p.x + time * waveSpeedX) * 0.002,
+                        (p.y + time * waveSpeedY) * 0.0015
+                    ) * 12;
+                    p.wave.x = Math.cos(move) * waveAmpX;
+                    p.wave.y = Math.sin(move) * waveAmpY;
+
+                    const dx = p.x - mouse.sx, dy = p.y - mouse.sy;
+                    const dist = Math.hypot(dx, dy), l = Math.max(175, mouse.vs);
+                    if (dist < l) {
+                        const s = 1 - dist / l;
+                        const f = Math.cos(dist * 0.001) * s;
+                        p.cursor.vx += Math.cos(mouse.a) * f * l * mouse.vs * 0.00065;
+                        p.cursor.vy += Math.sin(mouse.a) * f * l * mouse.vs * 0.00065;
+                    }
+                    p.cursor.vx += (0 - p.cursor.x) * tension;
+                    p.cursor.vy += (0 - p.cursor.y) * tension;
+                    p.cursor.vx *= friction;
+                    p.cursor.vy *= friction;
+                    p.cursor.x += p.cursor.vx * 2;
+                    p.cursor.y += p.cursor.vy * 2;
+                    p.cursor.x = Math.min(maxCursorMove, Math.max(-maxCursorMove, p.cursor.x));
+                    p.cursor.y = Math.min(maxCursorMove, Math.max(-maxCursorMove, p.cursor.y));
+                });
+            });
+        }
+
+        function moved(point, withCursor = true) {
+            const x = point.x + point.wave.x + (withCursor ? point.cursor.x : 0);
+            const y = point.y + point.wave.y + (withCursor ? point.cursor.y : 0);
+            return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+        }
+
+        function drawLines() {
+            const width = canvas.width;
+            const height = canvas.height;
+            ctx.clearRect(0, 0, width, height);
+            ctx.beginPath();
+            ctx.strokeStyle = lineColor;
+            lines.forEach((points) => {
+                let p1 = moved(points[0], false);
+                ctx.moveTo(p1.x, p1.y);
+                points.forEach((p, idx) => {
+                    const isLast = idx === points.length - 1;
+                    p1 = moved(p, !isLast);
+                    const p2 = moved(points[idx + 1] || points[points.length - 1], !isLast);
+                    ctx.lineTo(p1.x, p1.y);
+                    if (isLast) ctx.moveTo(p2.x, p2.y);
+                });
+            });
+            ctx.stroke();
+        }
+
+        function tick(t) {
+            const dx = mouse.x - mouse.lx, dy = mouse.y - mouse.ly;
+            const d = Math.hypot(dx, dy);
+            mouse.v = d;
+            mouse.vs += (d - mouse.vs) * 0.1;
+            mouse.vs = Math.min(100, mouse.vs);
+            mouse.lx = mouse.x; mouse.ly = mouse.y;
+            mouse.a = Math.atan2(dy, dx);
+
+            movePoints(t);
+            drawLines();
+            requestAnimationFrame(tick);
+        }
+
+        function onResize() {
+            setSize(); setLines();
+        }
+
+        function onMouseMove(e) {
+            updateMouse(e.pageX, e.pageY);
+        }
+
+        function updateMouse(x, y) {
+            const b = { left: 0, top: 0 };
+            mouse.x = x - b.left;
+            mouse.y = y - b.top;
+            if (!mouse.set) {
+                mouse.sx = mouse.x; mouse.sy = mouse.y;
+                mouse.lx = mouse.x; mouse.ly = mouse.y;
+                mouse.set = true;
+            } else {
+                mouse.sx = mouse.x; 
+                mouse.sy = mouse.y; 
+            }
+        }
+
+        setSize();
+        setLines();
+        requestAnimationFrame(tick);
+        window.addEventListener("resize", onResize);
+        window.addEventListener("mousemove", onMouseMove);
+    </script>
+</body>
+</html>
